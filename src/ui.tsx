@@ -114,7 +114,7 @@ export function EntryList({ entries, categories, edit, grouped = false }: {
   })}</ul>
 }
 
-export function Dialog({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
+export function Dialog({ title, close, children, busy = false }: { title: string; close: () => void; children: ReactNode; busy?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
   useLayoutEffect(() => {
     const dialog = ref.current!
@@ -135,7 +135,7 @@ export function Dialog({ title, close, children }: { title: string; close: () =>
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close()
     }}>
     <div className="dialog-heading"><h2 id="dialog-title">{title}</h2>
-      <button type="button" className="icon-button close-button" aria-label="Закрыть" onClick={close}><X size={20} /></button>
+      <button type="button" className="icon-button close-button" aria-label="Закрыть" onClick={close} disabled={busy}><X size={20} /></button>
     </div>
     {children}
   </dialog>

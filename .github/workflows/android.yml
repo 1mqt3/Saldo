@@ -1,0 +1,107 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
+      - 'capacitor.config.ts'
+      - 'scripts/sign-android.sh'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: saldo-android-release
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      SALDO_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set release version
+        run: |
+          test "$SALDO_VERSION_CODE" -le 2100000000
+          version="1.0.$((SALDO_VERSION_CODE - 1))"
+          echo "SALDO_VERSION_NAME=$version" >> "$GITHUB_ENV"
+          echo "APK_FILE=saldo-$version-vc$SALDO_VERSION_CODE.apk" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:android
+      - name: Build APK
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0'
+          ./android/gradlew -p android --no-daemon :app:assembleRelease
+      - name: Sign and verify APK
+        id: sign
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" ]]; then
+            echo "::notice::Configure ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD to publish signed APKs."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          keydir=$(mktemp -d "$RUNNER_TEMP/saldo-key.XXXXXX")
+          trap 'rm -rf -- "$keydir"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keydir/release.p12"
+          printf '%s\n' "$ANDROID_KEYSTORE_PASSWORD" > "$keydir/password"
+          ./scripts/sign-android.sh android/app/build/outputs/apk/release/app-release-unsigned.apk "$APK_FILE" "$keydir/release.p12" "$keydir/password"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.sign.outputs.signed == 'false'
+        with:
+          name: unsigned-android-${{ github.run_number }}-${{ github.run_attempt }}
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 1
+      - name: Publish on GitHub Releases
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="android-v$SALDO_VERSION_NAME"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$APK_FILE\") | .name" | grep -Fxq "$APK_FILE"; then
+            echo "This release is already published."
+            exit 0
+          fi
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 30 --json tagName --jq '[.[] | select(.tagName | startswith("android-v"))][0].tagName // ""')
+          notes=$(mktemp)
+          trap 'rm -f -- "$notes"' EXIT
+          if [[ -n "$previous" ]]; then
+            previous_code=$(gh release view "$previous" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name | capture("-vc(?<code>[0-9]+)\\.apk$") | .code][0] // "0"')
+            if (( previous_code >= SALDO_VERSION_CODE )); then
+              echo "An equal or newer Android release is already published."
+              exit 0
+            fi
+            git log --first-parent --format='- %s' "$previous..HEAD" > "$notes"
+          else
+            printf '%s\n' '- Первый выпуск «Сальдо» для Android.' > "$notes"
+          fi
+          if [[ ! -s "$notes" ]]; then
+            printf '%s\n' '- Обновление сборки Android.' > "$notes"
+          fi
+          gh release create "$tag" "$APK_FILE" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest --title "Сальдо $SALDO_VERSION_NAME" --notes-file "$notes"

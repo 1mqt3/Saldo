@@ -3,16 +3,19 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   ArrowDownToLine, ArrowUpFromLine, ChartPie, ChevronRight, CircleHelp,
-  Clock3, House, LayoutGrid, LockKeyhole, Moon, MoreHorizontal, Plus, ReceiptText, Repeat2,
+  Clock3, House, LayoutGrid, LockKeyhole, Moon, MoreHorizontal, Plus, ReceiptText, RefreshCw, Repeat2,
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
   appendMoneyManagerEntries, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, frequencies,
   isCustomCategory, money, monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor,
-  readImport, saveCategory, shiftPeriod, totals,
+  readBackup, readImport, saveCategory, shiftPeriod, totals,
 } from './model.ts'
 import type { Category, DataImport, Entry, Kind, Ledger, Period, Rule } from './model.ts'
-import { updateLedger } from './storage.ts'
+import { readMigrationBackup, updateLedger } from './storage.ts'
+import { checkAndroidUpdate, isAndroid, saldoAndroid, setAndroidBarStyle } from './android.ts'
+import type { AndroidInfo } from './android.ts'
+import type { AndroidRelease } from './android-release.ts'
 import {
   CategoryBadge, CategoryEditor, CategorySettingsList, Choice, Confirm, Dialog, Empty, EntryList, Flow, OperationEditor,
   Pager, SpendingChart, useInstallPrompt,
@@ -30,6 +33,7 @@ type Modal =
   | { type: 'delete-entry'; entry: Entry }
   | { type: 'delete-rule'; rule: Rule }
   | { type: 'import'; data: DataImport }
+  | { type: 'android-update'; release: AndroidRelease }
   | { type: 'install' }
 
 const views = {
@@ -74,13 +78,18 @@ function App() {
   const [filter, setFilter] = useState<Kind | 'all'>('all')
   const [modal, setModal] = useState<Modal | null>(null)
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
+  const [androidInfo, setAndroidInfo] = useState<AndroidInfo | null>(null)
+  const [hasMigrationBackup, setHasMigrationBackup] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [installingUpdate, setInstallingUpdate] = useState(false)
+  const [updateError, setUpdateError] = useState('')
   const channel = useRef<BroadcastChannel | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const { installed, install } = useInstallPrompt()
 
   function notify(message: string, error = false) { setToast({ message, error }) }
   function navigate(destination: View) { window.location.hash = destination }
-  function closeModal() { setModal(null) }
+  function closeModal() { if (!installingUpdate) setModal(null) }
 
   async function refresh() {
     try { setLedger(await updateLedger()); setLoadError(false) }
@@ -106,11 +115,29 @@ function App() {
     }
   }, [])
 
+  const theme = ledger?.theme
   useEffect(() => {
-    if (!ledger) return
-    document.documentElement.dataset.theme = ledger.theme
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', ledger.theme === 'dark' ? '#0f1013' : '#f5f6fa')
-  }, [ledger?.theme, ledger])
+    if (!theme) return
+    document.documentElement.dataset.theme = theme
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0f1013' : '#f5f6fa')
+    setAndroidBarStyle(theme)
+  }, [theme])
+
+  const loaded = ledger !== null
+  useEffect(() => {
+    if (!isAndroid || !loaded) return
+    let active = true
+    void saldoAndroid.getInfo().then(async info => {
+      if (!active) return
+      setAndroidInfo(info)
+      const release = await checkAndroidUpdate(info.code)
+      if (active && release) setModal(current => current ?? { type: 'android-update', release })
+    }).catch(() => {})
+    void readMigrationBackup().then(backup => {
+      if (active) setHasMigrationBackup(backup !== null)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [loaded])
 
   useEffect(() => {
     if (!toast) return
@@ -186,16 +213,61 @@ function App() {
     try {
       const snapshot = await updateLedger()
       setLedger(snapshot)
-      const url = URL.createObjectURL(new Blob([createBackup(snapshot)], { type: 'application/json' }))
+      const json = createBackup(snapshot)
+      const name = `saldo-${dateKey()}.json`
+      if (isAndroid) {
+        const { saved } = await saldoAndroid.saveBackup({ json, name })
+        if (saved) notify('Резервная копия сохранена')
+        return
+      }
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
       const link = document.createElement('a')
       link.href = url
-      link.download = `saldo-${dateKey()}.json`
+      link.download = name
       document.body.append(link)
       link.click()
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
       notify('Резервная копия подготовлена')
     } catch { notify('Не удалось создать резервную копию.', true) }
+  }
+
+  async function findUpdate() {
+    if (checkingUpdate) return
+    setCheckingUpdate(true)
+    try {
+      const info = await saldoAndroid.getInfo()
+      setAndroidInfo(info)
+      const release = await checkAndroidUpdate(info.code)
+      if (release) { setUpdateError(''); setModal({ type: 'android-update', release }) }
+      else notify('Установлена последняя версия')
+    } catch { notify('Не удалось проверить обновления. Проверьте интернет и попробуйте снова.', true) }
+    finally { setCheckingUpdate(false) }
+  }
+
+  async function downloadUpdate(release: AndroidRelease) {
+    if (installingUpdate) return
+    setInstallingUpdate(true)
+    setUpdateError('')
+    try {
+      const backup = createBackup(await updateLedger())
+      await saldoAndroid.installUpdate({ release, backup })
+      setModal(null)
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : 'Не удалось установить обновление.')
+    } finally {
+      setInstallingUpdate(false)
+      void saldoAndroid.getInfo().then(setAndroidInfo).catch(() => {})
+    }
+  }
+
+  async function restoreBeforeUpdate() {
+    try {
+      const backup = androidInfo?.hasUpdateBackup
+        ? readBackup((await saldoAndroid.readUpdateBackup()).json)
+        : await readMigrationBackup()
+      if (backup) setModal({ type: 'import', data: { format: 'saldo', ledger: backup } })
+    } catch { notify('Не удалось прочитать копию перед обновлением.', true) }
   }
 
   async function importFile(event: ChangeEvent<HTMLInputElement>) {
@@ -345,9 +417,16 @@ function App() {
             <p className="section-description">Сохраните резервную копию или импортируйте файл JSON из «Сальдо» или MoneyManager.</p>
             <button className="settings-row" type="button" onClick={() => void exportFile()}><ArrowDownToLine /><span>Экспорт данных</span><ChevronRight /></button>
             <button className="settings-row" type="button" onClick={() => fileInput.current?.click()}><ArrowUpFromLine /><span>Импорт данных</span><ChevronRight /></button>
+            {isAndroid && (androidInfo?.hasUpdateBackup || hasMigrationBackup) &&
+              <button className="settings-row" type="button" onClick={() => void restoreBeforeUpdate()}><ArrowUpFromLine /><span>Копия перед обновлением</span><ChevronRight /></button>}
             <input hidden type="file" accept=".json,application/json" aria-label="Файл для импорта" ref={fileInput} onChange={event => void importFile(event)} />
           </section>
-          {!installed && <section className="panel settings-panel">
+          {isAndroid && <section className="panel settings-panel">
+            <div className="panel-heading"><h2>Обновления</h2></div>
+            {androidInfo && <p className="section-description">Версия {androidInfo.version}</p>}
+            <button className="settings-row" type="button" onClick={() => void findUpdate()} disabled={checkingUpdate}><RefreshCw /><span>{checkingUpdate ? 'Проверяю…' : 'Проверить обновления'}</span><ChevronRight /></button>
+          </section>}
+          {!isAndroid && !installed && <section className="panel settings-panel">
             <div className="panel-heading"><h2>На главном экране</h2></div>
             <button type="button" className="settings-row" onClick={() => void installApp()}><Smartphone /><span>Установить приложение</span><ChevronRight /></button>
           </section>}
@@ -445,6 +524,17 @@ function App() {
         <button className="primary form-submit" type="button" onClick={closeModal}>Понятно</button>
       </div>
     }
+    if (modal?.type === 'android-update') {
+      const { release } = modal
+      dialogTitle = `Доступна версия ${release.version}`
+      dialogBody = <div className="dialog-form">
+        {release.notes && <p className="confirm-copy release-notes">{release.notes}</p>}
+        {updateError && <p className="form-error" role="alert">{updateError}</p>}
+        <button type="button" className="primary form-submit" onClick={() => void downloadUpdate(release)} disabled={installingUpdate}>
+          {installingUpdate ? 'Подготовка APK…' : 'Скачать и установить'}
+        </button>
+      </div>
+    }
   }
 
   function mobileLink(destination: View, text: string, icon: ReactNode, active = view === destination) {
@@ -489,7 +579,7 @@ function App() {
       {mobileLink('stats', 'Статистика', <ChartPie size={21} />)}
       {mobileLink('settings', 'Ещё', <MoreHorizontal size={23} />, view === 'settings' || isRecurring)}
     </nav>
-    {modal && <Dialog title={dialogTitle} close={closeModal}>{dialogBody}</Dialog>}
+    {modal && <Dialog title={dialogTitle} close={closeModal} busy={installingUpdate}>{dialogBody}</Dialog>}
     {toast && <div className={`toast ${toast.error ? 'toast-error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.message}</div>}
   </div>
 }
