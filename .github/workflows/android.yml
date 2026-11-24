@@ -41,6 +41,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0 build-tools;36.0.0'
       - name: Set release version
         run: |
           test "$SALDO_VERSION_CODE" -le 2100000000
@@ -51,9 +54,7 @@ jobs:
       - run: npm test
       - run: npm run build:android
       - name: Build APK
-        run: |
-          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;36.0.0'
-          ./android/gradlew -p android --no-daemon :app:assembleRelease
+        run: ./android/gradlew -p android --no-daemon :app:assembleRelease
       - name: Sign and verify APK
         id: sign
         env:
