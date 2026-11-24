@@ -7,7 +7,7 @@ import {
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
-  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, frequencies,
+  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, fallbackCategory, frequencies,
   isCustomCategory, money, monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor,
   readBackup, readImport, saveCategory, shiftPeriod, totals,
 } from './model.ts'
@@ -461,12 +461,12 @@ function App() {
     }
     if (modal?.type === 'manage-categories') {
       const { kind } = modal
-      const editable = ledger.categories.filter(category => category.kind === kind && isCustomCategory(category))
+      const editable = ledger.categories.filter(category => category.kind === kind)
       dialogTitle = kind === 'expense' ? 'Редактировать категории расходов' : 'Редактировать категории доходов'
       dialogBody = <div className="dialog-form">
         {editable.length > 0
           ? <CategorySettingsList categories={editable} edit={category => setModal({ type: 'category', category })} />
-          : <p className="confirm-copy">Пользовательских категорий пока нет.</p>}
+          : <p className="confirm-copy">Категорий пока нет.</p>}
       </div>
     }
     if (modal?.type === 'category') {
@@ -478,12 +478,13 @@ function App() {
         if (category) manageCategories(category.kind)
         else closeModal()
         notify(category ? 'Категория обновлена' : 'Категория создана')
-      }} remove={category ? () => setModal({ type: 'delete-category', category }) : undefined} />
+      }} remove={category && isCustomCategory(category) ? () => setModal({ type: 'delete-category', category }) : undefined} />
     }
     if (modal?.type === 'delete-category') {
       const { category } = modal
+      const destination = fallbackCategory(ledger.categories, category)?.name ?? 'Другое'
       dialogTitle = 'Удалить категорию?'
-      dialogBody = <Confirm description={`Связанные операции и регулярные платежи из категории «${category.name}» перейдут в «Другое».`} label="Удалить"
+      dialogBody = <Confirm description={`Связанные операции и регулярные платежи из категории «${category.name}» перейдут в «${destination}».`} label="Удалить"
         close={() => setModal({ type: 'category', category })} confirm={async () => {
           await commit(current => { deleteCategory(current, category.id) })
           manageCategories(category.kind)

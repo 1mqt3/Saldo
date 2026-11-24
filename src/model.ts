@@ -77,15 +77,14 @@ export function isCustomCategory(category: Category) {
   return !defaultCategories.some(standard => standard.id === category.id)
 }
 
-function editableCategory(ledger: Ledger, id: string) {
+function getCategory(ledger: Ledger, id: string) {
   const category = ledger.categories.find(item => item.id === id)
   if (!category) throw new Error('Эта категория уже удалена.')
-  if (!isCustomCategory(category)) throw new Error('Стандартная категория защищена от изменений.')
   return category
 }
 
 export function saveCategory(ledger: Ledger, details: CategoryDetails, id?: string) {
-  const existing = id === undefined ? undefined : editableCategory(ledger, id)
+  const existing = id === undefined ? undefined : getCategory(ledger, id)
   const kind = existing?.kind ?? 'expense'
   const name = details.name.trim()
   if (!name) throw new Error('Введите название.')
@@ -99,15 +98,22 @@ export function saveCategory(ledger: Ledger, details: CategoryDetails, id?: stri
   else ledger.categories.push({ ...changes, id: crypto.randomUUID(), kind })
 }
 
+export function fallbackCategory(categories: Category[], removed: Category) {
+  const fallbackId = `other-${removed.kind}`
+  const fallbackKey = categoryKey(removed.kind, 'Другое')
+  return categories.find(category => category.id === fallbackId && category.kind === removed.kind && category.id !== removed.id)
+    ?? categories.find(category => category.id !== removed.id && categoryKey(category.kind, category.name) === fallbackKey)
+}
+
 export function deleteCategory(ledger: Ledger, id: string) {
-  const removed = editableCategory(ledger, id)
+  const removed = getCategory(ledger, id)
+  if (!isCustomCategory(removed)) throw new Error('Стандартная категория защищена от удаления.')
   const remaining = ledger.categories.filter(category => category.id !== id)
   const affected = [...ledger.entries.filter(entry => entry.categoryId === id), ...ledger.rules.filter(rule => rule.categoryId === id)]
 
   if (affected.length || !remaining.some(category => category.kind === removed.kind)) {
     const standard = defaultCategories.find(category => category.id === `other-${removed.kind}`)!
-    const key = categoryKey(standard.kind, standard.name)
-    let fallback = remaining.find(category => categoryKey(category.kind, category.name) === key)
+    let fallback = fallbackCategory(remaining, removed)
     if (!fallback) {
       const idTaken = remaining.some(category => category.id === standard.id)
       fallback = { ...standard, id: idTaken ? crypto.randomUUID() : standard.id }

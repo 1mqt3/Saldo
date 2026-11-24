@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  applyDueRules, categoryTotals, createBackup, deleteCategory, isCustomCategory, newLedger, readBackup, saveCategory, totals,
+  applyDueRules, categoryTotals, createBackup, deleteCategory, fallbackCategory, isCustomCategory, newLedger, readBackup, saveCategory, totals,
 } from '../src/model.ts'
 import type { Category, Entry, Rule } from '../src/model.ts'
 
@@ -28,8 +28,26 @@ test('редактирование категории из старой копи
   assert.deepEqual(readBackup(createBackup(ledger)), ledger)
   saveCategory(ledger, changes, custom.id)
   assert.throws(() => saveCategory(ledger, { ...changes, name: 'пРОдуКты' }, custom.id), /таким названием/)
-  assert.throws(() => saveCategory(ledger, changes, 'food'), /Стандартная категория/)
   assert.throws(() => deleteCategory(ledger, 'other-expense'), /Стандартная категория/)
+})
+
+test('стандартные расходы и доходы редактируются с сохранением истории и расписаний', () => {
+  const ledger = newLedger()
+  ledger.entries.push(
+    { ...expense, categoryId: 'food' },
+    { ...expense, id: 'existing-income', kind: 'income', categoryId: 'salary' },
+  )
+  ledger.rules.push({ ...recurring, categoryId: 'food' })
+  const entries = structuredClone(ledger.entries)
+  const rules = structuredClone(ledger.rules)
+  saveCategory(ledger, { name: 'Продуктовый бюджет', color: '#112233', icon: 'utensils' }, 'food')
+  saveCategory(ledger, { name: 'Основная работа', color: '#7590ff', icon: 'briefcase' }, 'salary')
+  assert.deepEqual(ledger.entries, entries)
+  assert.deepEqual(ledger.rules, rules)
+  assert.equal(categoryTotals(ledger.entries, ledger.categories)[0].name, 'Продуктовый бюджет')
+  assert.equal(ledger.categories.find(category => category.id === 'salary')?.name, 'Основная работа')
+  assert.throws(() => deleteCategory(ledger, 'salary'), /Стандартная категория/)
+  assert.deepEqual(readBackup(createBackup(ledger)), ledger)
 })
 
 test('удаление переносит расходы и регулярные правила, сохраняя суммы и историю', () => {
@@ -37,6 +55,8 @@ test('удаление переносит расходы и регулярные
   ledger.categories.push({ ...custom })
   ledger.entries.push({ ...expense })
   ledger.rules.push({ ...recurring })
+  saveCategory(ledger, { name: 'Прочие расходы', color: '#112233', icon: 'dot' }, 'other-expense')
+  assert.equal(fallbackCategory(ledger.categories, custom)?.name, 'Прочие расходы')
   const balance = totals(ledger.entries)
   deleteCategory(ledger, custom.id)
   assert.deepEqual(ledger.entries, [{ ...expense, categoryId: 'other-expense' }])
