@@ -7,13 +7,14 @@ import {
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
-  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, entriesInRange, frequencies, money,
-  monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor, readImport, shiftPeriod, totals,
+  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, frequencies,
+  isCustomCategory, money, monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor,
+  readImport, saveCategory, shiftPeriod, totals,
 } from './model.ts'
-import type { DataImport, Entry, Kind, Ledger, Period, Rule } from './model.ts'
+import type { Category, DataImport, Entry, Kind, Ledger, Period, Rule } from './model.ts'
 import { updateLedger } from './storage.ts'
 import {
-  CategoryBadge, CategoryEditor, Choice, Confirm, Dialog, Empty, EntryList, Flow, OperationEditor,
+  CategoryBadge, CategoryEditor, CategorySettingsList, Choice, Confirm, Dialog, Empty, EntryList, Flow, OperationEditor,
   Pager, SpendingChart, useInstallPrompt,
 } from './ui.tsx'
 import type { OperationDraft } from './ui.tsx'
@@ -24,7 +25,8 @@ type View = 'overview' | 'history' | 'stats' | 'recurring' | 'settings'
 type Modal =
   | { type: 'entry'; entry?: Entry }
   | { type: 'rule'; rule?: Rule }
-  | { type: 'category' }
+  | { type: 'category'; category?: Category }
+  | { type: 'delete-category'; category: Category }
   | { type: 'delete-entry'; entry: Entry }
   | { type: 'delete-rule'; rule: Rule }
   | { type: 'import'; data: DataImport }
@@ -318,17 +320,25 @@ function App() {
     }
     if (view === 'settings') {
       const expenseCategories = ledger.categories.filter(category => category.kind === 'expense')
+      const customIncomeCategories = ledger.categories.filter(category => category.kind === 'income' && isCustomCategory(category))
+      const editCategory = (category: Category) => setModal({ type: 'category', category })
       content = <div className="settings-grid">
         <section className="panel settings-panel mobile-preferences">
           <div className="panel-heading"><h2>Приложение</h2></div>
           <button type="button" className="settings-row" onClick={() => navigate('recurring')}><Repeat2 /><span>Регулярные платежи</span><ChevronRight /></button>
           <button type="button" className="settings-row" onClick={() => void changeTheme()}><ThemeIcon /><span>{themeLabel}</span><ChevronRight /></button>
         </section>
-        <section className="panel settings-panel">
-          <div className="panel-heading"><h2><Tags size={19} /> Категории расходов</h2></div>
-          <div className="settings-categories">{expenseCategories.map(category => <div key={category.id}><CategoryBadge category={category} /><span>{category.name}</span></div>)}</div>
-          <button type="button" className="secondary new-category" onClick={() => setModal({ type: 'category' })}><Plus size={18} /> Создать категорию</button>
-        </section>
+        <div className="settings-column">
+          <section className="panel settings-panel">
+            <div className="panel-heading"><h2><Tags size={19} /> Категории расходов</h2></div>
+            <CategorySettingsList categories={expenseCategories} edit={editCategory} />
+            <button type="button" className="secondary new-category" onClick={() => setModal({ type: 'category' })}><Plus size={18} /> Создать категорию</button>
+          </section>
+          {customIncomeCategories.length > 0 && <section className="panel settings-panel">
+            <div className="panel-heading"><h2><Tags size={19} /> Категории доходов</h2></div>
+            <CategorySettingsList categories={customIncomeCategories} edit={editCategory} />
+          </section>}
+        </div>
         <div className="settings-column">
           <section className="panel settings-panel">
             <div className="panel-heading"><h2>Резервное копирование</h2></div>
@@ -363,17 +373,23 @@ function App() {
         remove={rule ? () => setModal({ type: 'delete-rule', rule }) : undefined} />
     }
     if (modal?.type === 'category') {
-      dialogTitle = 'Новая категория'
-      dialogBody = <CategoryEditor categories={ledger.categories} save={async category => {
-        await commit(current => {
-          if (current.categories.some(item => item.kind === 'expense' && item.name.toLocaleLowerCase('ru') === category.name.toLocaleLowerCase('ru'))) {
-            throw new Error('Категория с таким названием уже есть.')
-          }
-          current.categories.push(category)
-        })
+      const { category } = modal
+      dialogTitle = category ? 'Редактировать категорию' : 'Новая категория'
+      dialogBody = <CategoryEditor initial={category} save={async details => {
+        await commit(current => { saveCategory(current, details, category?.id) })
         closeModal()
-        notify('Категория создана')
-      }} />
+        notify(category ? 'Категория обновлена' : 'Категория создана')
+      }} remove={category ? () => setModal({ type: 'delete-category', category }) : undefined} />
+    }
+    if (modal?.type === 'delete-category') {
+      const { category } = modal
+      dialogTitle = 'Удалить категорию?'
+      dialogBody = <Confirm description={`Связанные операции и регулярные платежи из категории «${category.name}» перейдут в «Другое».`} label="Удалить"
+        close={() => setModal({ type: 'category', category })} confirm={async () => {
+          await commit(current => { deleteCategory(current, category.id) })
+          closeModal()
+          notify('Категория удалена')
+        }} />
     }
     if (modal?.type === 'delete-entry') {
       const { entry } = modal

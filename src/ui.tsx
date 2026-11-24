@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, CarFront, Check, ChevronDown, ChevronLeft,
-  ChevronRight, Circle, Coffee, Gamepad2, Gift, HeartPulse, House, PawPrint, Plane,
+  ChevronRight, Circle, Coffee, Gamepad2, Gift, HeartPulse, House, PawPrint, Pencil, Plane,
   Plus, ReceiptText, ShoppingBag, ShoppingBasket, Trash2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import {
-  categoryIcons, categoryTotals, dateKey, dateLabel, formatAmount, frequencies, money,
+  categoryIcons, categoryTotals, dateKey, dateLabel, formatAmount, frequencies, isCustomCategory, money,
   palette, parseAmount,
 } from './model.ts'
-import type { Category, CategoryIcon, Entry, Frequency, Kind, Rule } from './model.ts'
+import type { Category, CategoryDetails, CategoryIcon, Entry, Frequency, Kind, Rule } from './model.ts'
 
 const iconMap = {
   basket: ShoppingBasket, car: CarFront, coffee: Coffee, home: House, heart: HeartPulse,
@@ -221,31 +221,41 @@ const glyphLabels: Record<CategoryIcon, string> = {
   book: 'Книга', paw: 'Лапа', dot: 'Круг',
 }
 
-export function CategoryEditor({ categories, save }: { categories: Category[]; save: (category: Category) => Promise<void> }) {
-  const [name, setName] = useState('')
-  const [color, setColor] = useState<string>(palette[0])
-  const [icon, setIcon] = useState<CategoryIcon>('dot')
+export function CategorySettingsList({ categories, edit }: { categories: Category[]; edit: (category: Category) => void }) {
+  return <div className="settings-categories">{categories.map(category => {
+    const details = <><CategoryBadge category={category} /><span className="category-name">{category.name}</span></>
+    return isCustomCategory(category)
+      ? <button type="button" key={category.id} className="settings-category" onClick={() => edit(category)}
+          aria-label={`Редактировать категорию «${category.name}»`}>{details}<Pencil size={15} aria-hidden="true" /></button>
+      : <div key={category.id} className="settings-category">{details}</div>
+  })}</div>
+}
+
+const colorLabels = ['Синий', 'Зелёный', 'Оранжевый', 'Розовый', 'Лиловый', 'Голубой', 'Жёлтый', 'Коралловый']
+
+export function CategoryEditor({ initial, save, remove }: {
+  initial?: Category; save: (details: CategoryDetails) => Promise<void>; remove?: () => void
+}) {
+  const [name, setName] = useState(initial?.name ?? '')
+  const [color, setColor] = useState<string>(initial?.color ?? palette[0])
+  const [icon, setIcon] = useState<CategoryIcon>(initial?.icon ?? 'dot')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
+  const colors = initial && !palette.some(swatch => swatch === initial.color) ? [...palette, initial.color] : palette
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (pending) return
-    const cleaned = name.trim()
-    if (!cleaned) { setError('Введите название.'); return }
-    if (categories.some(category => category.kind === 'expense' && category.name.toLocaleLowerCase('ru') === cleaned.toLocaleLowerCase('ru'))) {
-      setError('Категория с таким названием уже есть.')
-      return
-    }
+    setError('')
     setPending(true)
-    try { await save({ id: crypto.randomUUID(), kind: 'expense', name: cleaned, color, icon }) }
+    try { await save({ name, color, icon }) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить категорию.') }
     finally { setPending(false) }
   }
   return <form className="dialog-form" onSubmit={submit}>
-    <label className="form-field">Название<input data-initial-focus required maxLength={32} value={name} placeholder="Например, Путешествия"
+    <label className="form-field">Название<input data-initial-focus={initial ? undefined : ''} required maxLength={32} value={name} placeholder="Например, Путешествия"
       onChange={event => { setName(event.target.value); setError('') }} /></label>
-    <fieldset><legend>Цвет</legend><div className="swatches">{palette.map((swatch, index) => <label className="swatch" key={swatch}>
-      <input type="radio" name="color" aria-label={['Синий', 'Зелёный', 'Оранжевый', 'Розовый', 'Лиловый', 'Голубой', 'Жёлтый', 'Коралловый'][index]}
+    <fieldset><legend>Цвет</legend><div className="swatches">{colors.map((swatch, index) => <label className="swatch" key={swatch}>
+      <input type="radio" name="color" aria-label={colorLabels[index] ?? 'Текущий цвет'}
         checked={swatch === color} onChange={() => setColor(swatch)} />
       <span style={{ background: swatch }}>{swatch === color && <Check size={17} />}</span>
     </label>)}</div></fieldset>
@@ -254,7 +264,10 @@ export function CategoryEditor({ categories, save }: { categories: Category[]; s
       <span><CategoryGlyph icon={glyph} /></span>
     </label>)}</div></fieldset>
     {error && <p className="form-error" role="alert">{error}</p>}
-    <button className="primary form-submit" type="submit" disabled={pending}><Plus size={18} /> Создать категорию</button>
+    <div className="dialog-actions">
+      {remove && <button type="button" className="icon-button delete-button" aria-label="Удалить категорию" onClick={remove} disabled={pending}><Trash2 size={20} /></button>}
+      <button className="primary form-submit" type="submit" disabled={pending}>{initial ? 'Сохранить' : <><Plus size={18} /> Создать категорию</>}</button>
+    </div>
   </form>
 }
 

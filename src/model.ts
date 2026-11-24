@@ -16,6 +16,8 @@ export interface Category {
   kind: Kind
 }
 
+export type CategoryDetails = Pick<Category, 'name' | 'color' | 'icon'>
+
 export interface Entry {
   id: string
   kind: Kind
@@ -62,6 +64,55 @@ const defaultCategories: Category[] = [
 
 export function newLedger(): Ledger {
   return { entries: [], rules: [], categories: defaultCategories.map(category => ({ ...category })), theme: 'dark' }
+}
+
+function categoryKey(kind: Kind, name: string) {
+  return kind + ':' + name.trim().normalize().toLocaleLowerCase('ru')
+}
+
+export function isCustomCategory(category: Category) {
+  return !defaultCategories.some(standard => standard.id === category.id)
+}
+
+function editableCategory(ledger: Ledger, id: string) {
+  const category = ledger.categories.find(item => item.id === id)
+  if (!category) throw new Error('Эта категория уже удалена.')
+  if (!isCustomCategory(category)) throw new Error('Стандартная категория защищена от изменений.')
+  return category
+}
+
+export function saveCategory(ledger: Ledger, details: CategoryDetails, id?: string) {
+  const existing = id === undefined ? undefined : editableCategory(ledger, id)
+  const kind = existing?.kind ?? 'expense'
+  const name = details.name.trim()
+  if (!name) throw new Error('Введите название.')
+  if (name.length > 32) throw new Error('Название должно содержать не более 32 символов.')
+  const key = categoryKey(kind, name)
+  if (ledger.categories.some(item => item.id !== id && categoryKey(item.kind, item.name) === key)) {
+    throw new Error('Категория с таким названием уже есть.')
+  }
+  const changes = { name, color: details.color, icon: details.icon }
+  if (existing) Object.assign(existing, changes)
+  else ledger.categories.push({ ...changes, id: crypto.randomUUID(), kind })
+}
+
+export function deleteCategory(ledger: Ledger, id: string) {
+  const removed = editableCategory(ledger, id)
+  const remaining = ledger.categories.filter(category => category.id !== id)
+  const affected = [...ledger.entries.filter(entry => entry.categoryId === id), ...ledger.rules.filter(rule => rule.categoryId === id)]
+
+  if (affected.length || !remaining.some(category => category.kind === removed.kind)) {
+    const standard = defaultCategories.find(category => category.id === `other-${removed.kind}`)!
+    const key = categoryKey(standard.kind, standard.name)
+    let fallback = remaining.find(category => categoryKey(category.kind, category.name) === key)
+    if (!fallback) {
+      const idTaken = remaining.some(category => category.id === standard.id)
+      fallback = { ...standard, id: idTaken ? crypto.randomUUID() : standard.id }
+      remaining.push(fallback)
+    }
+    for (const item of affected) item.categoryId = fallback.id
+  }
+  ledger.categories = remaining
 }
 
 const amountFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
@@ -304,10 +355,6 @@ interface MoneyManagerEntry {
 export type DataImport =
   | { format: 'saldo'; ledger: Ledger }
   | { format: 'money-manager'; entries: MoneyManagerEntry[]; hasPictures: boolean }
-
-function categoryKey(kind: Kind, name: string) {
-  return kind + ':' + name.trim().normalize().toLocaleLowerCase('ru')
-}
 
 export async function readImport(text: string): Promise<DataImport> {
   const parsed = parseBackupJson(text)

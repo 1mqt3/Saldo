@@ -417,7 +417,10 @@ h1 { font-size: clamp(2.25rem, 4vw, 3.1rem); line-height: 1.1; letter-spacing: -
 .settings-panel { padding: 19px 21px; }
 .section-description { margin: 9px 0 12px; color: var(--muted); font-size: .91rem; line-height: 1.55; }
 .settings-categories { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 10px; margin: 19px 0; }
-.settings-categories > div { display: flex; gap: 8px; align-items: center; font-size: .85rem; font-weight: 740; overflow-wrap: anywhere; }
+.settings-category { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: .85rem; font-weight: 740; text-align: left; }
+.settings-category .category-name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+button.settings-category { min-height: 45px; padding: 3px 6px; border-radius: 10px; background: var(--panel-raised); }
+button.settings-category > svg { color: var(--accent-bright); }
 .new-category { width: 100%; }
 .settings-row {
   display: flex;
@@ -533,7 +536,7 @@ legend { margin: 0 0 6px; padding: 0; }
 .toast-error { border-color: var(--danger); }
 
 @media (hover: hover) {
-  :is(.side-nav a, .theme-button, .secondary, .icon-button:not(:disabled), .settings-row, .item-row):hover { background: var(--button-hover); color: var(--text); }
+  :is(.side-nav a, .theme-button, .secondary, .icon-button:not(:disabled), .settings-row, button.settings-category, .item-row):hover { background: var(--button-hover); color: var(--text); }
   .side-nav a[aria-current='page']:hover { color: var(--accent-bright); background: var(--selected); }
   .primary:not(:disabled):hover { background: #3856e7; }
   .danger:hover { background: #a92440; }
