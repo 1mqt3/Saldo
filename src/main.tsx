@@ -7,10 +7,10 @@ import {
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
-  createBackup, dateKey, dateLabel, entriesInRange, frequencies, money, monthLabel, nextOccurrenceIndex,
-  occurrence, offsetMonth, periodLabel, rangeFor, readBackup, shiftPeriod, totals,
+  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, entriesInRange, frequencies, money,
+  monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor, readImport, shiftPeriod, totals,
 } from './model.ts'
-import type { Entry, Kind, Ledger, Period, Rule } from './model.ts'
+import type { DataImport, Entry, Kind, Ledger, Period, Rule } from './model.ts'
 import { updateLedger } from './storage.ts'
 import {
   CategoryBadge, CategoryEditor, Choice, Confirm, Dialog, Empty, EntryList, Flow, OperationEditor,
@@ -27,7 +27,7 @@ type Modal =
   | { type: 'category' }
   | { type: 'delete-entry'; entry: Entry }
   | { type: 'delete-rule'; rule: Rule }
-  | { type: 'import'; ledger: Ledger }
+  | { type: 'import'; data: DataImport }
   | { type: 'install' }
 
 const views = {
@@ -200,7 +200,7 @@ function App() {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
     if (!file) return
-    try { setModal({ type: 'import', ledger: readBackup(await file.text()) }) }
+    try { setModal({ type: 'import', data: await readImport(await file.text()) }) }
     catch (error) { notify((error as Error).message, true) }
   }
 
@@ -332,10 +332,10 @@ function App() {
         <div className="settings-column">
           <section className="panel settings-panel">
             <div className="panel-heading"><h2>Резервное копирование</h2></div>
-            <p className="section-description">Сохраните копию всех операций, категорий и расписаний в файл JSON.</p>
+            <p className="section-description">Сохраните резервную копию или импортируйте файл JSON из «Сальдо» или MoneyManager.</p>
             <button className="settings-row" type="button" onClick={() => void exportFile()}><ArrowDownToLine /><span>Экспорт данных</span><ChevronRight /></button>
             <button className="settings-row" type="button" onClick={() => fileInput.current?.click()}><ArrowUpFromLine /><span>Импорт данных</span><ChevronRight /></button>
-            <input hidden type="file" accept=".json,application/json" aria-label="Файл резервной копии" ref={fileInput} onChange={event => void importFile(event)} />
+            <input hidden type="file" accept=".json,application/json" aria-label="Файл для импорта" ref={fileInput} onChange={event => void importFile(event)} />
           </section>
           {!installed && <section className="panel settings-panel">
             <div className="panel-heading"><h2>На главном экране</h2></div>
@@ -395,14 +395,31 @@ function App() {
           notify('Платёж удалён')
         }} />
     }
-    if (modal?.type === 'import') {
-      const backup = modal.ledger
+    if (modal?.type === 'import' && modal.data.format === 'saldo') {
+      const backup = modal.data.ledger
       dialogTitle = 'Восстановить данные?'
       dialogBody = <Confirm description={`Текущие данные будут заменены данными из файла. Операций в копии: ${backup.entries.length}.`} label="Восстановить"
         close={closeModal} confirm={async () => {
           await commit(() => backup)
           closeModal()
           notify('Данные восстановлены')
+        }} />
+    }
+    if (modal?.type === 'import' && modal.data.format === 'money-manager') {
+      const { entries, hasPictures } = modal.data
+      const pictures = hasPictures ? ' Фотографии из файла будут пропущены.' : ''
+      dialogTitle = 'Импорт из MoneyManager'
+      dialogBody = <Confirm description={`Операций в файле: ${entries.length}. Импорт дополнит журнал. Уже импортированные записи будут пропущены.${pictures}`} label="Импортировать"
+        close={closeModal} destructive={false} confirm={async () => {
+          let added: Entry[] = []
+          await commit(current => { added = appendMoneyManagerEntries(current, entries) })
+          closeModal()
+          if (!added.length) { notify('Эти операции уже импортированы'); return }
+          const latest = added.reduce((last, entry) => entry.date > last && entry.date <= today ? entry.date : last, '')
+          if (latest) setMonth(offsetMonth(latest, 0))
+          setFilter('all')
+          navigate('history')
+          notify(`Операций добавлено: ${added.length}`)
         }} />
     }
     if (modal?.type === 'install') {

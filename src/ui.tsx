@@ -258,7 +258,9 @@ export function CategoryEditor({ categories, save }: { categories: Category[]; s
   </form>
 }
 
-export function Confirm({ description, label, close, confirm }: { description: string; label: string; close: () => void; confirm: () => Promise<void> }) {
+export function Confirm({ description, label, close, confirm, destructive = true }: {
+  description: string; label: string; close: () => void; confirm: () => Promise<void>; destructive?: boolean
+}) {
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
   async function run() {
@@ -273,7 +275,7 @@ export function Confirm({ description, label, close, confirm }: { description: s
     {error && <p role="alert" className="form-error">{error}</p>}
     <div className="confirm-actions">
       <button type="button" className="secondary" onClick={close} disabled={pending}>Отмена</button>
-      <button type="button" className="danger" onClick={() => void run()} disabled={pending}>{label}</button>
+      <button type="button" className={destructive ? 'danger' : 'primary'} onClick={() => void run()} disabled={pending}>{label}</button>
     </div>
   </div>
 }

@@ -241,10 +241,20 @@ function validId(value: unknown): value is string {
   return typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 160
 }
 
+function invalidBackup() {
+  return new Error('Файл повреждён или имеет неподдерживаемый формат.')
+}
+
+function parseBackupJson(text: string): unknown {
+  try { return JSON.parse(text.replace(/^\uFEFF/, '')) } catch { throw invalidBackup() }
+}
+
 export function readBackup(text: string): Ledger {
-  const invalid = () => new Error('Файл повреждён или имеет неподдерживаемый формат.')
-  let parsed: unknown
-  try { parsed = JSON.parse(text.replace(/^\uFEFF/, '')) } catch { throw invalid() }
+  return readBackupData(parseBackupJson(text))
+}
+
+function readBackupData(parsed: unknown): Ledger {
+  const invalid = invalidBackup
   if (!record(parsed) || parsed.format !== backupFormat || parsed.version !== 1 || !record(parsed.ledger)) throw invalid()
   const { categories, entries, rules, theme } = parsed.ledger
   if (!Array.isArray(categories) || !Array.isArray(entries) || !Array.isArray(rules) || (theme !== 'dark' && theme !== 'light')) throw invalid()
@@ -280,4 +290,97 @@ export function readBackup(text: string): Ledger {
     ruleIds.add(rule.id)
   }
   return { categories: categories as Category[], entries: entries as Entry[], rules: rules as Rule[], theme }
+}
+
+interface MoneyManagerEntry {
+  id: string
+  kind: Kind
+  cents: number
+  categoryName: string
+  date: string
+  note: string
+}
+
+export type DataImport =
+  | { format: 'saldo'; ledger: Ledger }
+  | { format: 'money-manager'; entries: MoneyManagerEntry[]; hasPictures: boolean }
+
+function categoryKey(kind: Kind, name: string) {
+  return kind + ':' + name.trim().normalize().toLocaleLowerCase('ru')
+}
+
+export async function readImport(text: string): Promise<DataImport> {
+  const parsed = parseBackupJson(text)
+  if (!Array.isArray(parsed)) return { format: 'saldo', ledger: readBackupData(parsed) }
+  if (!parsed.length) throw new Error('В файле нет операций.')
+
+  const occurrences = new Map<string, number>()
+  let hasPictures = false
+  const rows = parsed.map((row: unknown, index) => {
+    const invalid = (reason: string) => new Error(`MoneyManager, операция ${index + 1}. ${reason}`)
+    if (!record(row) || typeof row.category !== 'string' ||
+      typeof row.remark !== 'string' || typeof row.amount !== 'string' ||
+      typeof row.currency !== 'string' || typeof row.type !== 'string' ||
+      typeof row.account !== 'string' || !Array.isArray(row.pictures) || !validDate(row.date)) {
+      throw invalid('Проверьте поля и дату в файле экспорта.')
+    }
+    const type = row.type.trim().toLocaleLowerCase('ru')
+    const income = ['доходы', 'доход', 'income'].includes(type)
+    if (!income && !['расходы', 'расход', 'expense'].includes(type)) {
+      throw invalid('Поддерживаются доходы и расходы.')
+    }
+    if (row.currency.trim().toUpperCase() !== 'RUB') {
+      throw invalid('Поддерживаются операции в рублях (RUB).')
+    }
+    const cents = parseAmount(row.amount)
+    if (cents === null) throw invalid('Сумма должна быть положительной и содержать не более двух знаков после запятой.')
+
+    const kind: Kind = income ? 'income' : 'expense'
+    const categoryName = row.category.trim() || 'Другое'
+    const account = row.account.trim()
+    const note = [row.remark, account && `Счёт: ${account}`].filter(Boolean).join(' · ')
+    if (categoryName.length > 32 || note.length > 100) {
+      throw invalid('Название категории или заметка слишком длинные.')
+    }
+    hasPictures ||= row.pictures.length > 0
+
+    const key = JSON.stringify([kind, row.date, cents, categoryKey(kind, categoryName), row.remark, account])
+    const occurrence = (occurrences.get(key) ?? 0) + 1
+    occurrences.set(key, occurrence)
+    return { key, occurrence, kind, cents, categoryName, date: row.date, note }
+  })
+
+  const encoder = new TextEncoder()
+  const entries = await Promise.all(rows.map(async ({ key, occurrence, ...entry }): Promise<MoneyManagerEntry> => {
+    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(key))
+    const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+    return { ...entry, id: `money-manager:${hash}:${occurrence}` }
+  }))
+  return { format: 'money-manager', entries, hasPictures }
+}
+
+export function appendMoneyManagerEntries(ledger: Ledger, entries: MoneyManagerEntry[]) {
+  const known = new Set(ledger.entries.map(entry => entry.id))
+  const categories = new Map(ledger.categories.map(category => [categoryKey(category.kind, category.name), category]))
+  const added: Entry[] = []
+  const createdAt = Date.now()
+
+  for (const { categoryName, ...entry } of entries) {
+    if (known.has(entry.id)) continue
+    const key = categoryKey(entry.kind, categoryName)
+    let category = categories.get(key)
+    if (!category) {
+      category = {
+        id: crypto.randomUUID(), kind: entry.kind, name: categoryName,
+        color: palette[ledger.categories.length % palette.length], icon: entry.kind === 'income' ? 'wallet' : 'dot',
+      }
+      ledger.categories.push(category)
+      categories.set(key, category)
+    }
+    const imported = { ...entry, categoryId: category.id, createdAt }
+    ledger.entries.push(imported)
+    added.push(imported)
+    known.add(entry.id)
+  }
+  return added
 }
