@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
-  ArrowDownLeft, ArrowUpRight, CalendarDays, CarFront, Check, ChevronDown, ChevronLeft,
-  ChevronRight, Circle, Coffee, Gamepad2, Gift, HeartPulse, House, PawPrint, Pencil, Plane,
-  Plus, ReceiptText, ShoppingBag, ShoppingBasket, Trash2, Wallet, BookOpen, X,
+  ArrowDownLeft, ArrowUpRight, Banknote, BookOpen, BriefcaseBusiness, CalendarDays, CarFront, Check, ChevronDown, ChevronLeft,
+  ChevronRight, Circle, Coffee, CreditCard, Gamepad2, Gift, GraduationCap, HeartPulse, House, KeyRound, PawPrint, Plane,
+  Plus, ReceiptText, Shirt, ShoppingBag, ShoppingBasket, Smartphone, Trash2, Utensils, Wallet, X,
 } from 'lucide-react'
 import {
-  categoryIcons, categoryTotals, dateKey, dateLabel, formatAmount, frequencies, isCustomCategory, money,
+  categoryIcons, categoryTotals, dateKey, dateLabel, formatAmount, frequencies, money,
   palette, parseAmount,
 } from './model.ts'
 import type { Category, CategoryDetails, CategoryIcon, Entry, Frequency, Kind, Rule } from './model.ts'
@@ -15,6 +15,8 @@ const iconMap = {
   basket: ShoppingBasket, car: CarFront, coffee: Coffee, home: House, heart: HeartPulse,
   shopping: ShoppingBag, game: Gamepad2, wallet: Wallet, gift: Gift, plane: Plane,
   book: BookOpen, paw: PawPrint, dot: Circle,
+  phone: Smartphone, shirt: Shirt, card: CreditCard, graduation: GraduationCap, keys: KeyRound,
+  banknote: Banknote, utensils: Utensils, briefcase: BriefcaseBusiness,
 }
 
 export function CategoryGlyph({ icon, size = 18 }: { icon: CategoryIcon; size?: number }) {
@@ -219,14 +221,16 @@ const glyphLabels: Record<CategoryIcon, string> = {
   basket: 'Продукты', car: 'Транспорт', coffee: 'Кофе', home: 'Дом', heart: 'Здоровье',
   shopping: 'Покупки', game: 'Игры', wallet: 'Кошелёк', gift: 'Подарок', plane: 'Самолёт',
   book: 'Книга', paw: 'Лапа', dot: 'Круг',
+  phone: 'Телефон', shirt: 'Одежда', card: 'Банковская карта', graduation: 'Образование', keys: 'Ключи',
+  banknote: 'Купюра', utensils: 'Еда', briefcase: 'Работа',
 }
 
-export function CategorySettingsList({ categories, edit }: { categories: Category[]; edit: (category: Category) => void }) {
-  return <div className="settings-categories">{categories.map(category => {
+export function CategorySettingsList({ categories, edit }: { categories: Category[]; edit?: (category: Category) => void }) {
+  return <div className={edit ? 'category-management-list' : 'settings-categories'}>{categories.map(category => {
     const details = <><CategoryBadge category={category} /><span className="category-name">{category.name}</span></>
-    return isCustomCategory(category)
+    return edit
       ? <button type="button" key={category.id} className="settings-category" onClick={() => edit(category)}
-          aria-label={`Редактировать категорию «${category.name}»`}>{details}<Pencil size={15} aria-hidden="true" /></button>
+          aria-label={`Редактировать категорию «${category.name}»`}>{details}<ChevronRight size={16} aria-hidden="true" /></button>
       : <div key={category.id} className="settings-category">{details}</div>
   })}</div>
 }

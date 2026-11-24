@@ -5,7 +5,10 @@ export type Frequency = 'weekly' | 'monthly' | 'yearly'
 
 export const palette = ['#7590ff', '#48d9aa', '#ffb361', '#f583ad', '#ae92f9', '#5ecbfa', '#f7d365', '#ff836d'] as const
 
-export const categoryIcons = ['basket', 'car', 'coffee', 'home', 'heart', 'shopping', 'game', 'wallet', 'gift', 'plane', 'book', 'paw', 'dot'] as const
+export const categoryIcons = [
+  'basket', 'car', 'coffee', 'home', 'heart', 'shopping', 'game', 'wallet', 'gift', 'plane', 'book', 'paw',
+  'phone', 'shirt', 'card', 'graduation', 'keys', 'banknote', 'utensils', 'briefcase', 'dot',
+] as const
 export type CategoryIcon = typeof categoryIcons[number]
 
 export interface Category {

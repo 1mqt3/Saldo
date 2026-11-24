@@ -19,12 +19,13 @@ test('редактирование категории из старой копи
   original.categories.push({ ...custom })
   original.entries.push({ ...expense })
   const ledger = readBackup(createBackup(original))
-  const changes = { name: '  Путешествия ', color: '#7590ff', icon: 'plane' } as const
+  const changes = { name: '  Обучение ', color: '#7590ff', icon: 'graduation' } as const
   assert.equal(isCustomCategory(ledger.categories.at(-1)!), true)
   saveCategory(ledger, changes, custom.id)
   assert.deepEqual(ledger.entries, [expense])
-  assert.equal(categoryTotals(ledger.entries, ledger.categories)[0].name, 'Путешествия')
-  assert.deepEqual(ledger.categories.at(-1), { ...custom, ...changes, name: 'Путешествия' })
+  assert.equal(categoryTotals(ledger.entries, ledger.categories)[0].name, 'Обучение')
+  assert.deepEqual(ledger.categories.at(-1), { ...custom, ...changes, name: 'Обучение' })
+  assert.deepEqual(readBackup(createBackup(ledger)), ledger)
   saveCategory(ledger, changes, custom.id)
   assert.throws(() => saveCategory(ledger, { ...changes, name: 'пРОдуКты' }, custom.id), /таким названием/)
   assert.throws(() => saveCategory(ledger, changes, 'food'), /Стандартная категория/)

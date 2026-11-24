@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   ArrowDownToLine, ArrowUpFromLine, ChartPie, ChevronRight, CircleHelp,
-  Clock3, House, LayoutGrid, LockKeyhole, Moon, MoreHorizontal, Plus, ReceiptText, RefreshCw, Repeat2,
+  Clock3, House, LayoutGrid, LockKeyhole, Moon, MoreHorizontal, Pencil, Plus, ReceiptText, RefreshCw, Repeat2,
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
@@ -29,6 +29,7 @@ type Modal =
   | { type: 'entry'; entry?: Entry }
   | { type: 'rule'; rule?: Rule }
   | { type: 'category'; category?: Category }
+  | { type: 'manage-categories'; kind: Kind }
   | { type: 'delete-category'; category: Category }
   | { type: 'delete-entry'; entry: Entry }
   | { type: 'delete-rule'; rule: Rule }
@@ -90,6 +91,7 @@ function App() {
   function notify(message: string, error = false) { setToast({ message, error }) }
   function navigate(destination: View) { window.location.hash = destination }
   function closeModal() { if (!installingUpdate) setModal(null) }
+  function manageCategories(kind: Kind) { setModal({ type: 'manage-categories', kind }) }
 
   async function refresh() {
     try { setLedger(await updateLedger()); setLoadError(false) }
@@ -298,6 +300,7 @@ function App() {
   let content: ReactNode
   let dialogTitle = ''
   let dialogBody: ReactNode
+  let dismissDialog = closeModal
 
   if (ledger) {
     const monthEntries = entriesInRange(ledger.entries, rangeFor(month, 'month'))
@@ -392,8 +395,7 @@ function App() {
     }
     if (view === 'settings') {
       const expenseCategories = ledger.categories.filter(category => category.kind === 'expense')
-      const customIncomeCategories = ledger.categories.filter(category => category.kind === 'income' && isCustomCategory(category))
-      const editCategory = (category: Category) => setModal({ type: 'category', category })
+      const incomeCategories = ledger.categories.filter(category => category.kind === 'income')
       content = <div className="settings-grid">
         <section className="panel settings-panel mobile-preferences">
           <div className="panel-heading"><h2>Приложение</h2></div>
@@ -403,13 +405,19 @@ function App() {
         <div className="settings-column">
           <section className="panel settings-panel">
             <div className="panel-heading"><h2><Tags size={19} /> Категории расходов</h2></div>
-            <CategorySettingsList categories={expenseCategories} edit={editCategory} />
-            <button type="button" className="secondary new-category" onClick={() => setModal({ type: 'category' })}><Plus size={18} /> Создать категорию</button>
+            <CategorySettingsList categories={expenseCategories} />
+            <div className="category-actions">
+              <button type="button" className="secondary" onClick={() => setModal({ type: 'category' })}><Plus size={18} /> Создать категорию</button>
+              <button type="button" className="secondary" onClick={() => manageCategories('expense')} aria-label="Редактировать категории расходов"><Pencil size={17} /> Редактировать категории</button>
+            </div>
           </section>
-          {customIncomeCategories.length > 0 && <section className="panel settings-panel">
+          <section className="panel settings-panel">
             <div className="panel-heading"><h2><Tags size={19} /> Категории доходов</h2></div>
-            <CategorySettingsList categories={customIncomeCategories} edit={editCategory} />
-          </section>}
+            <CategorySettingsList categories={incomeCategories} />
+            <div className="category-actions">
+              <button type="button" className="secondary" onClick={() => manageCategories('income')} aria-label="Редактировать категории доходов"><Pencil size={17} /> Редактировать категории</button>
+            </div>
+          </section>
         </div>
         <div className="settings-column">
           <section className="panel settings-panel">
@@ -451,12 +459,24 @@ function App() {
       dialogBody = <OperationEditor isRule initial={rule} categories={ledger.categories} defaults={defaults} save={draft => saveRule(draft, rule)}
         remove={rule ? () => setModal({ type: 'delete-rule', rule }) : undefined} />
     }
+    if (modal?.type === 'manage-categories') {
+      const { kind } = modal
+      const editable = ledger.categories.filter(category => category.kind === kind && isCustomCategory(category))
+      dialogTitle = kind === 'expense' ? 'Редактировать категории расходов' : 'Редактировать категории доходов'
+      dialogBody = <div className="dialog-form">
+        {editable.length > 0
+          ? <CategorySettingsList categories={editable} edit={category => setModal({ type: 'category', category })} />
+          : <p className="confirm-copy">Пользовательских категорий пока нет.</p>}
+      </div>
+    }
     if (modal?.type === 'category') {
       const { category } = modal
       dialogTitle = category ? 'Редактировать категорию' : 'Новая категория'
+      if (category) dismissDialog = () => manageCategories(category.kind)
       dialogBody = <CategoryEditor initial={category} save={async details => {
         await commit(current => { saveCategory(current, details, category?.id) })
-        closeModal()
+        if (category) manageCategories(category.kind)
+        else closeModal()
         notify(category ? 'Категория обновлена' : 'Категория создана')
       }} remove={category ? () => setModal({ type: 'delete-category', category }) : undefined} />
     }
@@ -466,7 +486,7 @@ function App() {
       dialogBody = <Confirm description={`Связанные операции и регулярные платежи из категории «${category.name}» перейдут в «Другое».`} label="Удалить"
         close={() => setModal({ type: 'category', category })} confirm={async () => {
           await commit(current => { deleteCategory(current, category.id) })
-          closeModal()
+          manageCategories(category.kind)
           notify('Категория удалена')
         }} />
     }
@@ -579,7 +599,7 @@ function App() {
       {mobileLink('stats', 'Статистика', <ChartPie size={21} />)}
       {mobileLink('settings', 'Ещё', <MoreHorizontal size={23} />, view === 'settings' || isRecurring)}
     </nav>
-    {modal && <Dialog title={dialogTitle} close={closeModal} busy={installingUpdate}>{dialogBody}</Dialog>}
+    {modal && <Dialog title={dialogTitle} close={dismissDialog} busy={installingUpdate}>{dialogBody}</Dialog>}
     {toast && <div className={`toast ${toast.error ? 'toast-error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.message}</div>}
   </div>
 }

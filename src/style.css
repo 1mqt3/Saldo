@@ -421,7 +421,7 @@ h1 { font-size: clamp(2.25rem, 4vw, 3.1rem); line-height: 1.1; letter-spacing: -
 .settings-category .category-name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 button.settings-category { min-height: 45px; padding: 3px 6px; border-radius: 10px; background: var(--panel-raised); }
 button.settings-category > svg { color: var(--accent-bright); }
-.new-category { width: 100%; }
+.category-actions, .category-management-list { display: grid; gap: 8px; }
 .settings-row {
   display: flex;
   align-items: center;
