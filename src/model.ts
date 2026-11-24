@@ -73,10 +73,6 @@ function categoryKey(kind: Kind, name: string) {
   return kind + ':' + name.trim().normalize().toLocaleLowerCase('ru')
 }
 
-export function isCustomCategory(category: Category) {
-  return !defaultCategories.some(standard => standard.id === category.id)
-}
-
 function getCategory(ledger: Ledger, id: string) {
   const category = ledger.categories.find(item => item.id === id)
   if (!category) throw new Error('Эта категория уже удалена.')
@@ -98,30 +94,34 @@ export function saveCategory(ledger: Ledger, details: CategoryDetails, id?: stri
   else ledger.categories.push({ ...changes, id: crypto.randomUUID(), kind })
 }
 
-export function fallbackCategory(categories: Category[], removed: Category) {
+export function categoryReplacement(ledger: Ledger, removed: Category) {
+  const candidates = ledger.categories.filter(category => category.kind === removed.kind && category.id !== removed.id)
+  const linked = ledger.entries.some(entry => entry.categoryId === removed.id) || ledger.rules.some(rule => rule.categoryId === removed.id)
+  if (!linked && candidates.length) return null
+
   const fallbackId = `other-${removed.kind}`
   const fallbackKey = categoryKey(removed.kind, 'Другое')
-  return categories.find(category => category.id === fallbackId && category.kind === removed.kind && category.id !== removed.id)
-    ?? categories.find(category => category.id !== removed.id && categoryKey(category.kind, category.name) === fallbackKey)
+  const unassignedKey = categoryKey(removed.kind, 'Без категории')
+  const removingUnassigned = categoryKey(removed.kind, removed.name) === unassignedKey
+  const existing = candidates.find(category => category.id === fallbackId)
+    ?? candidates.find(category => categoryKey(category.kind, category.name) === fallbackKey)
+    ?? candidates.find(category => categoryKey(category.kind, category.name) === unassignedKey)
+    ?? (removingUnassigned ? candidates[0] : undefined)
+  return { id: existing?.id, name: existing?.name ?? (removingUnassigned ? 'Другое' : 'Без категории'), linked }
 }
 
 export function deleteCategory(ledger: Ledger, id: string) {
   const removed = getCategory(ledger, id)
-  if (!isCustomCategory(removed)) throw new Error('Стандартная категория защищена от удаления.')
-  const remaining = ledger.categories.filter(category => category.id !== id)
-  const affected = [...ledger.entries.filter(entry => entry.categoryId === id), ...ledger.rules.filter(rule => rule.categoryId === id)]
+  const replacement = categoryReplacement(ledger, removed)
+  ledger.categories = ledger.categories.filter(category => category.id !== id)
+  if (!replacement) return
 
-  if (affected.length || !remaining.some(category => category.kind === removed.kind)) {
-    const standard = defaultCategories.find(category => category.id === `other-${removed.kind}`)!
-    let fallback = fallbackCategory(remaining, removed)
-    if (!fallback) {
-      const idTaken = remaining.some(category => category.id === standard.id)
-      fallback = { ...standard, id: idTaken ? crypto.randomUUID() : standard.id }
-      remaining.push(fallback)
-    }
-    for (const item of affected) item.categoryId = fallback.id
+  const replacementId = replacement.id ?? crypto.randomUUID()
+  if (!replacement.id) {
+    ledger.categories.push({ id: replacementId, kind: removed.kind, name: replacement.name, color: '#a1a9bb', icon: 'dot' })
   }
-  ledger.categories = remaining
+  for (const entry of ledger.entries) if (entry.categoryId === id) entry.categoryId = replacementId
+  for (const rule of ledger.rules) if (rule.categoryId === id) rule.categoryId = replacementId
 }
 
 const amountFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })

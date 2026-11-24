@@ -1,5 +1,6 @@
+import { App as NativeApp } from '@capacitor/app'
 import { createRoot } from 'react-dom/client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   ArrowDownToLine, ArrowUpFromLine, ChartPie, ChevronRight, CircleHelp,
@@ -7,8 +8,8 @@ import {
   Settings2, Smartphone, Sun, Tags, Wallet,
 } from 'lucide-react'
 import {
-  appendMoneyManagerEntries, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, fallbackCategory, frequencies,
-  isCustomCategory, money, monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor,
+  appendMoneyManagerEntries, categoryReplacement, createBackup, dateKey, dateLabel, deleteCategory, entriesInRange, frequencies,
+  money, monthLabel, nextOccurrenceIndex, occurrence, offsetMonth, periodLabel, rangeFor,
   readBackup, readImport, saveCategory, shiftPeriod, totals,
 } from './model.ts'
 import type { Category, DataImport, Entry, Kind, Ledger, Period, Rule } from './model.ts'
@@ -478,14 +479,17 @@ function App() {
         if (category) manageCategories(category.kind)
         else closeModal()
         notify(category ? 'Категория обновлена' : 'Категория создана')
-      }} remove={category && isCustomCategory(category) ? () => setModal({ type: 'delete-category', category }) : undefined} />
+      }} remove={category ? () => setModal({ type: 'delete-category', category }) : undefined} />
     }
     if (modal?.type === 'delete-category') {
       const { category } = modal
-      const destination = fallbackCategory(ledger.categories, category)?.name ?? 'Другое'
+      const replacement = categoryReplacement(ledger, category)
+      let description = `Категория «${category.name}» будет удалена.`
+      if (replacement?.linked) description += ` Операции и регулярные платежи перейдут в «${replacement.name}».`
+      else if (replacement) description += ` Для новых операций появится категория «${replacement.name}».`
       dialogTitle = 'Удалить категорию?'
-      dialogBody = <Confirm description={`Связанные операции и регулярные платежи из категории «${category.name}» перейдут в «${destination}».`} label="Удалить"
-        close={() => setModal({ type: 'category', category })} confirm={async () => {
+      dismissDialog = () => setModal({ type: 'category', category })
+      dialogBody = <Confirm description={description} label="Удалить" close={dismissDialog} confirm={async () => {
           await commit(current => { deleteCategory(current, category.id) })
           manageCategories(category.kind)
           notify('Категория удалена')
@@ -494,8 +498,9 @@ function App() {
     if (modal?.type === 'delete-entry') {
       const { entry } = modal
       dialogTitle = 'Удалить операцию?'
+      dismissDialog = () => setModal({ type: 'entry', entry })
       dialogBody = <Confirm description={`Операция на ${money(entry.cents)} за ${dateLabel(entry.date)} будет удалена из истории.`} label="Удалить"
-        close={() => setModal({ type: 'entry', entry })} confirm={async () => {
+        close={dismissDialog} confirm={async () => {
           await commit(current => { current.entries = current.entries.filter(item => item.id !== entry.id) })
           closeModal()
           notify('Операция удалена')
@@ -504,8 +509,9 @@ function App() {
     if (modal?.type === 'delete-rule') {
       const { rule } = modal
       dialogTitle = 'Удалить регулярный платёж?'
+      dismissDialog = () => setModal({ type: 'rule', rule })
       dialogBody = <Confirm description="Расписание будет удалено. Уже добавленные операции останутся в истории." label="Удалить"
-        close={() => setModal({ type: 'rule', rule })} confirm={async () => {
+        close={dismissDialog} confirm={async () => {
           await commit(current => { current.rules = current.rules.filter(item => item.id !== rule.id) })
           closeModal()
           notify('Платёж удалён')
@@ -557,6 +563,18 @@ function App() {
       </div>
     }
   }
+
+  const handleAndroidBack = useEffectEvent((canGoBack: boolean) => {
+    if (modal) dismissDialog()
+    else if (canGoBack) window.history.back()
+    else if (view !== 'overview') window.location.replace('#overview')
+    else void NativeApp.minimizeApp().catch(() => {})
+  })
+  useEffect(() => {
+    if (!isAndroid) return
+    const subscription = NativeApp.addListener('backButton', ({ canGoBack }) => handleAndroidBack(canGoBack)).catch(() => null)
+    return () => { void subscription.then(listener => listener?.remove()).catch(() => {}) }
+  }, [])
 
   function mobileLink(destination: View, text: string, icon: ReactNode, active = view === destination) {
     return <a href={`#${destination}`} aria-current={active ? 'page' : undefined} className="mobile-link">{icon}<span>{text}</span></a>
